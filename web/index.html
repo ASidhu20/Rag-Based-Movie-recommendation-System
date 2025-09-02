@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Movie Recommender</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-50 text-gray-900">
+  <div class="max-w-5xl mx-auto p-6">
+    <h1 class="text-2xl font-semibold mb-6">RAG Movie Recommender</h1>
+
+    <div class="grid md:grid-cols-2 gap-6">
+      <!-- Recommend -->
+      <section class="bg-white border rounded-lg p-4">
+        <h2 class="text-lg font-medium mb-3">Get Recommendations</h2>
+        <form id="recommend-form" class="space-y-3">
+          <label class="block">
+            <span class="text-sm font-medium">Answers (one per line)</span>
+            <textarea id="answers" class="mt-1 w-full border rounded p-2 h-32" placeholder="I want something mind-bending&#10;Prefer sci-fi or mystery with strong plot twists"></textarea>
+          </label>
+          <div class="grid grid-cols-3 gap-3">
+            <label class="block">
+              <span class="text-sm font-medium">Top N</span>
+              <input id="topN" type="number" value="5" min="1" max="50" class="mt-1 w-full border rounded p-2" />
+            </label>
+            <label class="block">
+              <span class="text-sm font-medium">Offset</span>
+              <input id="offset" type="number" value="0" min="0" class="mt-1 w-full border rounded p-2" />
+            </label>
+            <label class="block">
+              <span class="text-sm font-medium">Threshold</span>
+              <input id="threshold" type="number" step="0.01" value="0.25" min="0" max="1" class="mt-1 w-full border rounded p-2" />
+            </label>
+          </div>
+          <label class="inline-flex items-center">
+            <input id="rerank" type="checkbox" class="mr-2" />
+            <span class="text-sm">Rerank with Gemini (adds brief reasons)</span>
+          </label>
+          <button class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">Recommend</button>
+        </form>
+
+        <div id="recommend-output" class="mt-4 space-y-2"></div>
+      </section>
+
+      <!-- Ingest -->
+      <section class="bg-white border rounded-lg p-4">
+        <h2 class="text-lg font-medium mb-3">Ingest Movies</h2>
+        <p class="text-sm text-gray-600 mb-2">Paste JSON array of movies. Fields: title (required), year, genres [], cast [], plot, metadata.</p>
+        <form id="ingest-form" class="space-y-3">
+          <textarea id="ingest-json" class="w-full border rounded p-2 h-48" placeholder='[
+  {"title":"Inception","year":2010,"genres":["Sci-Fi","Thriller"],"cast":["Leonardo DiCaprio"],"plot":"A thief enters dreams to plant ideas."},
+  {"title":"La La Land","year":2016,"genres":["Romance","Musical"],"cast":["Emma Stone","Ryan Gosling"],"plot":"A jazz pianist and an actress fall in love in LA."}
+]'></textarea>
+          <button class="px-4 py-2 bg-emerald-600 text-white rounded hover:bg-emerald-700">Ingest</button>
+        </form>
+        <div id="ingest-output" class="mt-3 text-sm"></div>
+      </section>
+    </div>
+  </div>
+
+  <script>
+    const api = (path) => `${location.origin}${path}`
+
+    document.getElementById('recommend-form').addEventListener('submit', async (e) => {
+      e.preventDefault()
+      const answers = document.getElementById('answers').value
+        .split('\n')
+        .map(s => s.trim())
+        .filter(Boolean)
+      const topN = Number(document.getElementById('topN').value || 5)
+      const offset = Number(document.getElementById('offset').value || 0)
+      const threshold = Number(document.getElementById('threshold').value || 0.25)
+      const rerank = document.getElementById('rerank').checked
+
+      const out = document.getElementById('recommend-output')
+      out.innerHTML = '<div class="text-sm text-gray-500">Loading...</div>'
+
+      try {
+        const resp = await fetch(api('/api/recommend'), {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ answers, topN, offset, threshold, rerank })
+        })
+        const data = await resp.json()
+        if (!resp.ok) throw new Error(data?.error || 'Request failed')
+        const list = data.topN || []
+        out.innerHTML = list.map((r, i) => `
+          <div class="border rounded p-3">
+            <div class="flex items-center justify-between">
+              <div class="font-medium">${i + 1}. ${r.title} ${r.year ? '(' + r.year + ')' : ''}</div>
+              <div class="text-xs text-gray-600">score: ${r.score?.toFixed?.(3) ?? '-'}</div>
+            </div>
+            ${r.genres?.length ? `<div class="text-sm text-gray-700">Genres: ${r.genres.join(', ')}</div>` : ''}
+            ${r.why ? `<div class="mt-1 text-sm text-gray-800"><span class="font-medium">Why:</span> ${r.why}</div>` : ''}
+          </div>
+        `).join('')
+      } catch (err) {
+        out.innerHTML = `<div class="text-sm text-red-600">Error: ${err.message}</div>`
+      }
+    })
+
+    document.getElementById('ingest-form').addEventListener('submit', async (e) => {
+      e.preventDefault()
+      const out = document.getElementById('ingest-output')
+      out.textContent = 'Ingesting...'
+      try {
+        const movies = JSON.parse(document.getElementById('ingest-json').value)
+        const resp = await fetch(api('/api/ingest/movies'), {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ movies })
+        })
+        const data = await resp.json()
+        if (!resp.ok) throw new Error(data?.error || 'Request failed')
+        out.textContent = `Inserted/updated: ${data.inserted} | IDs: ${data.ids?.join(', ') || '-'}`
+      } catch (err) {
+        out.textContent = `Error: ${err.message}`
+      }
+    })
+  </script>
+</body>
+</html>
